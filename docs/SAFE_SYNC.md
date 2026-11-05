@@ -13,6 +13,10 @@ This fork defaults Local Replica to **local-first, verified uploads**. It is int
 - No automatic deletion, in either direction. Local deletion is flagged for review. Rename therefore uploads the new path but leaves the old cloud path for manual cleanup.
 - Invisible Mode is unsupported for verified sync: its buffered acknowledgements do not prove server persistence.
 
+## 0.15.1003 fixes
+
+File creation now sends multipart bytes with the matching Content-Type boundary to undici. The previous form-data stream was rejected by Overleaf with HTTP 400 `invalid_upload_request`. Upload failures retain the actual server error. Regression coverage checks multipart bytes and headers; live tests create a Chinese .bib document and verify a fresh server readback.
+
 ## 0.15.1002 fixes
 
 - Restore the current local replica from its `.overleaf/settings.json` when re-login removed the project SCM registry; never re-enable an explicitly disabled record.

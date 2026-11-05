@@ -709,9 +709,7 @@ export class VirtualFileSystem extends vscode.Disposable {
             if (_res.type==='success' && _res.entity!==undefined) {
                 res = _res.entity;
             } else {
-                if (_res.message!==undefined) {
-                    vscode.window.showErrorMessage(_res.message);
-                }
+                throw new Error(`File upload failed: ${_res.message || 'no server response'}`);
             }
         }
         if (!res || !res._type) { throw new Error('Server did not confirm file creation.'); }

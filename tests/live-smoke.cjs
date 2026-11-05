@@ -22,6 +22,10 @@ const {VirtualFileSystem}=require('../out/core/remoteFileSystemProvider');const 
   try{project=await socket.joinProject(projectId);break;}catch(e){console.log('JOIN_RETRY',String(e));socket.init();}
  }
  if(!project)throw Error('Cannot connect to scratch project');
+ const bibText='@article{test,title={中文测试}}\n';
+ const bib=await api.uploadFile(identity,projectId,project.rootFolder[0]._id,'safe-upload-'+Date.now()+'.bib',Buffer.from(bibText));
+ assert.equal(bib.type,'success');assert.ok(bib.entity?._id);
+ const bibRead=await socket.joinDoc(bib.entity._id);assert.equal(bibRead.docLines.join('\n'),bibText);console.log('VERIFIED_NEW_BIB_UPLOAD');
  const added=await api.addDoc(identity,projectId,project.rootFolder[0]._id,'safe-sync-'+Date.now()+'.tex');
  if(added.type!=='success'||!added.entity)throw Error('Could not create test document');
  const doc={...added.entity};fs.writeFileSync('../live-test-doc.json',JSON.stringify({projectId,docId:doc._id}));
