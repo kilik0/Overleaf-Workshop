@@ -75,7 +75,7 @@ export class SCMCollectionProvider extends vscode.Disposable {
     private updateStatus() {
         if (!this.statusBarItem) { return; }
 
-        let numPush = 0, numPull = 0;
+        let numPush = 0, numPull = 0, numAttention = 0;
         let tooltip = new vscode.MarkdownString(`**${vscode.l10n.t('Project Source Control')}**\n\n`);
         tooltip.supportHtml = true;
         tooltip.supportThemeIcons = true;
@@ -94,7 +94,7 @@ export class SCMCollectionProvider extends vscode.Disposable {
                 if (!enabled) {
                     tooltip.appendMarkdown(`&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;*${vscode.l10n.t('Disabled')}.*\n\n`);
                 } else if (scm.status.status==='idle') {
-                    tooltip.appendMarkdown(`&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;*${vscode.l10n.t('Synced')}.*\n\n`);
+                    tooltip.appendMarkdown(`&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;*${(scm.status.message || 'Verified')}.*\n\n`);
                 } else {
                     // show status message
                     tooltip.appendMarkdown(`&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;***${scm.status.message}***\n\n`);
@@ -102,14 +102,19 @@ export class SCMCollectionProvider extends vscode.Disposable {
                     switch (scm.status.status) {
                         case 'push': numPush++; break;
                         case 'pull': numPull++; break;
+                        case 'need-attention': numAttention++; break;
                     }
                 }
             }   
         }
         this.statusBarItem.tooltip = tooltip;
+        this.statusBarItem.backgroundColor = undefined;
 
         // update status bar item text
-        if (numPush!==0) {
+        if (numAttention!==0) {
+            this.statusBarItem.text = `$(warning) Overleaf: needs attention`;
+            this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        } else if (numPush!==0) {
             this.statusBarItem.text = `$(cloud-upload)`;
         } else if (numPull!==0) {
             this.statusBarItem.text = `$(cloud-download)`;
@@ -143,13 +148,17 @@ export class SCMCollectionProvider extends vscode.Disposable {
                 settings: {} as JSON,
             });
         }
-        // insert into collection
+        // Insert before starting async work so initialization/errors are visible in the status bar.
+        const record: SCMRecord = {scm, enabled, triggers: []};
+        this.scms.push(record);
         try {
-            const triggers = enabled ? await scm.triggers : [];
-            this.scms.push({scm,enabled,triggers});
+            record.triggers = enabled ? await scm.triggers : [];
             this.updateStatus();
             return scm;
         } catch (error) {
+            scm.markFailed(`Initialization failed: ${String(error)}`);
+            this.updateStatus();
+            void vscode.window.showErrorMessage(`Overleaf Safe Sync initialization failed: ${String(error)}. Local files preserved.`);
             // permanently remove failed scm
             // this.vfs.setProjectSCMPersist(scm.scmKey, undefined);
             vscode.window.showErrorMessage( vscode.l10n.t('"{scm}" creation failed.', {scm:scmProto.label}) );

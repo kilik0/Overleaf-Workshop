@@ -1,10 +1,8 @@
 {
-    "extension.displayName": "Overleaf Workshop",
-    "extension.description": "Open Overleaf/ShareLaTex projects in VSCode, with full collaboration support.",
-
+    "extension.displayName": "Overleaf Workshop — Safe Sync Fork",
+    "extension.description": "Local-first Overleaf sync with durable revisions, verified uploads, and visible conflicts. Fork maintained by kilik0.",
     "commands.remoteFileSystem.refreshLinkedFile.title": "Overleaf: Refresh File",
     "commands.remoteFileSystem.createLinkedFile.title": "Overleaf: Import File ...",
-
     "commands.projectManager.addServer.title": "Add New Server",
     "commands.projectManager.removeServer.title": "Remove Server",
     "commands.projectManager.loginServer.title": "Login to Server",
@@ -26,7 +24,6 @@
     "commands.projectManager.openProjectInCurrentWindow.title": "Open Project in Current Window",
     "commands.projectManager.openProjectInNewWindow.title": "Open Project in New Window",
     "commands.projectManager.openProjectLocalReplica.title": "Open Project Locally ...",
-
     "commands.projectHistory.refresh.title": "Refresh Project History",
     "commands.projectHistory.clearSelection.title": "Clear Selection",
     "commands.projectHistory.createLabel.title": "Add New Label",
@@ -37,18 +34,15 @@
     "commands.projectHistory.downloadProject.title": "Download Project",
     "commands.projectHistory.revealHistoryView.title": "Focus on Overleaf History View",
     "commands.projectSCM.configSCM.title": "Configure Source Control ...",
-
     "commands.compileManager.compile.title": "Compile Project",
     "commands.compileManager.viewPdf.title": "View Compiled PDF",
     "commands.compileManager.syncCode.title": "Jump to PDF",
     "commands.compileManager.setCompiler.title": "Set Compiler",
     "commands.compileManager.setRootDoc.title": "Set Root Document",
-
     "commands.collaboration.copyLineRef.title": "Overleaf: Copy Line Reference",
     "commands.collaboration.insertLineRef.title": "Overleaf: Insert Line Reference",
     "commands.collaboration.revealChatView.title": "Focus on Overleaf Chat View",
     "commands.collaboration.jumpToUser.title": "Jump to Collaborator ...",
-
     "configuration.compileOnSave.enabled.markdownDescription": "Always update the compiled PDF when a file is saved.",
     "configuration.localReplica.syncOnFileChange.enabled.markdownDescription": "Sync Local Replica changes made by external tools. (Take effect after restarting VSCode)",
     "configuration.compileOutputFolderName.markdownDescription": "The name of the folder where the compiled output files (e.g., `output.pdf`) is located. (Take effect after restarting VSCode)",
@@ -62,12 +56,10 @@
     "configuration.invisibleMode.chatMessageRefreshInterval.markdownDescription": "The interval (in seconds) to refresh the chat messages in invisible mode.",
     "configuration.invisibleMode.inactiveTimeout.markdownDescription": "The timeout (in seconds) to mark a online Collaborator as inactivate in invisible mode.",
     "configuration.formatWithLineBreak.enabled.markdownDescription": "Enable line breaks when formatting.",
-
     "views.overleaf-workshop.projectManager.name": "Hosts",
     "views.explorer.overleaf-workshop.projectHistory": "History",
     "views.explorer.overleaf-workshop.contextualTitle": "Overleaf Project History",
     "views.explorer.overleaf-workshop.chatWebview.name": "Chat",
     "views.explorer.overleaf-workshop.chatWebview.contextualTitle": "Overleaf Chat",
-
     "customEditors.overleaf-workshop.pdfViewer.displayName": "Overleaf Workshop PDF Viewer"
 }

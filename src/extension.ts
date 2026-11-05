@@ -29,6 +29,10 @@ export function activate(context: vscode.ExtensionContext) {
     const langIntellisenseProvider = new LangIntellisenseProvider(context, remoteFileSystemProvider);
     context.subscriptions.push( ...langIntellisenseProvider.triggers );
 
+    for (const action of ['retry', 'review', 'publish'] as const) {
+        context.subscriptions.push(vscode.commands.registerCommand(`${ROOT_NAME}.safeSync.${action}`, () => LocalReplicaSCMProvider.runCommand(action)));
+    }
+
     // activate vfs for local replica
     LocalReplicaSCMProvider.readSettings()
     .then(async setting => {
@@ -45,6 +49,8 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             }
         }
+    }).catch(error => {
+        void vscode.window.showErrorMessage(`Overleaf Safe Sync failed to start: ${String(error)}. Local files are preserved.`);
     });
 }
 

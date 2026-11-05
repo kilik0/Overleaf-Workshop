@@ -491,7 +491,7 @@ export class BaseAPI {
             else if (res.status===206) {
                 content.push(Buffer.from(await res.arrayBuffer()));
             } else {
-                break;
+                throw new Error(`Download failed: HTTP ${res.status}`);
             }
         };
 

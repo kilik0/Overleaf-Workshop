@@ -2,7 +2,7 @@
   "name": "overleaf-workshop",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.15.10",
+  "version": "0.15.1001",
   "icon": "resources/icons/app_icon.png",
   "author": {
     "name": "iamhyc",
@@ -47,7 +47,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/overleaf-workshop/overleaf-workshop"
+    "url": "https://github.com/kilik0/Overleaf-Workshop"
   },
   "bugs": {
     "url": "https://github.com/overleaf-workshop/overleaf-workshop/issues"
@@ -393,6 +393,21 @@
         "title": "%commands.collaboration.jumpToUser.title%",
         "enablement": "resourceScheme == overleaf-workshop || overleaf-workshop.activate",
         "category": "%extension.displayName%"
+      },
+      {
+        "command": "overleaf-workshop.safeSync.retry",
+        "title": "Retry and verify local files",
+        "category": "Overleaf Safe Sync"
+      },
+      {
+        "command": "overleaf-workshop.safeSync.review",
+        "title": "Review unverified files",
+        "category": "Overleaf Safe Sync"
+      },
+      {
+        "command": "overleaf-workshop.safeSync.publish",
+        "title": "Publish selected local version...",
+        "category": "Overleaf Safe Sync"
       }
     ],
     "keybindings": [
@@ -790,7 +805,8 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
     "test": "node ./out/test/runTest.js",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "test:safe-sync": "tsc -p ./ && node --test tests/*.test.cjs"
   },
   "dependencies": {
     "@unified-latex/unified-latex-prettier": "^1.8.3",

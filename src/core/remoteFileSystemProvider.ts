@@ -266,7 +266,7 @@ export class VirtualFileSystem extends vscode.Disposable {
                 const identity = await GlobalStateManager.authenticate(this.context, this.serverName);
                 project.settings = (await this.api.getProjectSettings(identity, this.projectId)).settings!;
                 this.root = project;
-                const activeCondition = (vscode.workspace.workspaceFolders===undefined) || (vscode.workspace.workspaceFolders?.[0].uri.scheme!==ROOT_NAME) || (vscode.workspace.workspaceFolders?.[0].uri===this.origin);
+                const activeCondition = (vscode.workspace.workspaceFolders===undefined) || (vscode.workspace.workspaceFolders?.[0].uri.scheme!==ROOT_NAME) || (vscode.workspace.workspaceFolders?.[0].uri.toString()===this.origin.toString());
                 // Register: [collaboration] ClientManager on Statusbar
                 if (activeCondition) {
                     if (this.clientManagerItem?.triggers) {
@@ -280,11 +280,8 @@ export class VirtualFileSystem extends vscode.Disposable {
                     };
                 }
                 // Register: [scm] SCMCollectionProvider in explorer
-                if (activeCondition) {
-                    if (this.scmCollectionItem?.triggers) {
-                        this.scmCollectionItem.triggers.forEach((trigger) => trigger.dispose());
-                        delete this.scmCollectionItem;
-                    }
+                // Preserve the sync queue/lock through reconnects. Recreating it races an in-flight writer.
+                if (activeCondition && !this.scmCollectionItem) {
                     const scmCollection = new SCMCollectionProvider(this, this.context);
                     this.scmCollectionItem = {
                         collection: scmCollection,
@@ -654,6 +651,44 @@ export class VirtualFileSystem extends vscode.Disposable {
         }
     }
 
+    /** Authoritative read for safe sync. Never confirms uploads from remoteCache/localCache. */
+    async readFileForSync(uri: vscode.Uri): Promise<Uint8Array | undefined> {
+        if (this.isInvisibleMode) { throw new Error('Safe sync requires a live connection; Invisible Mode is unsupported.'); }
+        let resolved: Awaited<ReturnType<VirtualFileSystem['_resolveUri']>>;
+        try { resolved = await this._resolveUri(uri); }
+        catch (error) {
+            if ((error as vscode.FileSystemError).code === 'FileNotFound') { return undefined; }
+            throw error;
+        }
+        const {fileType, fileEntity} = resolved;
+        if (!fileEntity) { return undefined; }
+        if (fileType === 'doc') {
+            const doc = fileEntity as DocumentEntity;
+            const result = await this.socket.joinDoc(doc._id);
+            if (!Array.isArray(result.docLines) || typeof result.version !== 'number') {
+                throw new Error('Server returned an invalid document snapshot.');
+            }
+            const text = result.docLines.join('\n');
+            doc.version = result.version;
+            doc.remoteCache = text;
+            doc.localCache = text;
+            return new TextEncoder().encode(text);
+        }
+        if (fileType !== 'file') { throw new Error('Cannot synchronize a folder as a file.'); }
+        const identity = await GlobalStateManager.authenticate(this.context, this.serverName);
+        const result = await this.api.getFile(identity, this.projectId, fileEntity._id);
+        if (result.type !== 'success' || result.content === undefined) { throw new Error('Remote download failed.'); }
+        return result.content;
+    }
+
+    async writeFileForSync(uri: vscode.Uri, content: Uint8Array, expected: string | null): Promise<void> {
+        const current = await this.readFileForSync(uri);
+        const actual = current === undefined ? null : require('crypto').createHash('sha256').update(current).digest('hex');
+        if (actual !== expected) { throw new Error('Remote changed before upload; refusing to overwrite.'); }
+        // Exact OT write at the freshly fetched server version. Server rejects stale versions.
+        await this.writeFile(uri, content, true, true, true, expected);
+    }
+
     async createFile(uri: vscode.Uri, content:Uint8Array, overwrite?:boolean) {
         const {parentFolder, fileName, fileEntity} = await this._resolveUri(uri);
         if (fileEntity && !overwrite) {
@@ -679,6 +714,7 @@ export class VirtualFileSystem extends vscode.Disposable {
                 }
             }
         }
+        if (!res || !res._type) { throw new Error('Server did not confirm file creation.'); }
         if (res && res._type) {
             this.insertEntity(parentFolder, res._type, res);
             this.notify([
@@ -819,7 +855,7 @@ export class VirtualFileSystem extends vscode.Disposable {
         ]);
     }
 
-    async writeFile(uri: vscode.Uri, content:Uint8Array, create:boolean, overwrite:boolean) {
+    async writeFile(uri: vscode.Uri, content:Uint8Array, create:boolean, overwrite:boolean, exact=false, expectedHash?: string | null) {
         const {fileType, fileEntity} = await this._resolveUri(uri);
 
         // if non-exists --> create it
@@ -836,21 +872,24 @@ export class VirtualFileSystem extends vscode.Disposable {
         if (fileType && fileType==='doc' && fileEntity) {
             const doc = fileEntity as DocumentEntity;
             const _content = new TextDecoder().decode(content);
+            if (exact && expectedHash !== undefined && require('crypto').createHash('sha256').update(doc.remoteCache ?? '').digest('hex') !== expectedHash) {
+                throw new Error('Remote changed during upload preparation; refusing to overwrite.');
+            }
             if (doc.version===undefined || doc.localCache===undefined || doc.remoteCache===undefined) {
-                return;
+                throw new Error('Document is not initialized; upload was not sent.');
             }
             const dmp = new DiffMatchPatch();
             const patches = dmp.patch_make(doc.localCache,  doc.remoteCache);
 
             const mergeResArray = dmp.patch_apply(patches, _content);
-            const mergeRes = mergeResArray[0] as string;
+            const mergeRes = exact ? _content : mergeResArray[0] as string;
             const update = {
                 doc: doc._id,
                 lastV: doc.lastVersion,
                 v: doc.version,
                 // Reference: services/web/frontend/js/vendor/libs/sharejs.js#L1288
                 hash: (()=>{
-                    if (!doc.mtime || Date.now()-doc.mtime>5000) {
+                    if (exact || !doc.mtime || Date.now()-doc.mtime>5000) {
                         doc.mtime = Date.now();
                         return require('crypto').createHash('sha1').update(
                             "blob " + mergeRes.length + "\x00" + mergeRes

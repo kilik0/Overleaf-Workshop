@@ -32,7 +32,10 @@ export class LangIntellisenseProvider {
         const config = vscode.workspace.getConfiguration("cSpell");
         const enabledSchemes = config.get<Record<string, boolean>>("enabledSchemes") || {}; 
         enabledSchemes[ROOT_NAME] = true; 
-        config.update("enabledSchemes", enabledSchemes, vscode.ConfigurationTarget.Global);
+        if (config.inspect('enabledSchemes')) {
+            void config.update("enabledSchemes", enabledSchemes, vscode.ConfigurationTarget.Global)
+                .then(undefined, error => console.warn('Optional CSpell integration:', String(error)));
+        }
         
         this.activate();
     }

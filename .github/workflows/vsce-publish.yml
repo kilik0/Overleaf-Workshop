@@ -9,6 +9,7 @@ on:
 
 jobs:
   publish:
+    if: github.repository == 'overleaf-workshop/Overleaf-Workshop'
     runs-on: ubuntu-latest
 
     steps:

@@ -138,6 +138,10 @@ export abstract class BaseSCM {
         EventBus.fire('scmStatusChangeEvent', {status});
     }
 
+    public markFailed(message: string): void {
+        this.status = {status:'need-attention', message};
+    }
+
     get scmKey(): string {
         return this.baseUri.toString();
     }

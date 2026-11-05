@@ -22,3 +22,6 @@ views/pdf-viewer/vendor/web/standard_fonts
 
 views/chat-view/**
 !views/chat-view/dist/**
+
+tests/**
+!docs/SAFE_SYNC.md

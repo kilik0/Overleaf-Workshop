@@ -1,3 +1,11 @@
+# Safe Sync fork — kilik0
+
+Local-first Overleaf publishing with durable local revisions, uncached server readback, visible failures/conflicts, and no automatic overwrite of existing local source files. **This is a behavior-changing fork, not an upstream release.**
+
+Read [Safe Sync setup, migration, limitations and rollback](docs/SAFE_SYNC.md) before using it. First-run local/cloud differences require explicit review. Do not run the upstream Local Replica in another window against the same folder.
+
+---
+
 # Overleaf Workshop
 
 [![GitHub Repo stars](https://img.shields.io/github/stars/overleaf-workshop/Overleaf-Workshop)](https://github.com/overleaf-workshop/Overleaf-Workshop)
