@@ -9,6 +9,8 @@ import { LangIntellisenseProvider } from './intellisense';
 import { LocalReplicaSCMProvider } from './scm/localReplicaSCM';
 
 export function activate(context: vscode.ExtensionContext) {
+    const syncLog = LocalReplicaSCMProvider.getOutputChannel();
+    syncLog.appendLine(`${new Date().toISOString()} Safe Sync extension activated; checking local replica association.`);
     // Register: [core] RemoteFileSystemProvider
     const remoteFileSystemProvider = new RemoteFileSystemProvider(context);
     context.subscriptions.push( ...remoteFileSystemProvider.triggers );
@@ -36,6 +38,9 @@ export function activate(context: vscode.ExtensionContext) {
     // activate vfs for local replica
     LocalReplicaSCMProvider.readSettings()
     .then(async setting => {
+        if (!setting?.uri) {
+            syncLog.appendLine('No local replica metadata in the open workspace root. Open the folder containing .overleaf/settings.json.');
+        }
         if (setting?.uri) {
             const uri = vscode.Uri.parse(setting.uri);
             if (uri.scheme===ROOT_NAME) {
@@ -50,6 +55,7 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }
     }).catch(error => {
+        syncLog.appendLine(`[startup error] ${String(error)}`);
         void vscode.window.showErrorMessage(`Overleaf Safe Sync failed to start: ${String(error)}. Local files are preserved.`);
     });
 }

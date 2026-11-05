@@ -98,7 +98,7 @@ export class LocalReplicaSCMProvider extends BaseSCM {
 
     public static async pathToUri(path: string): Promise<vscode.Uri | undefined> {
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri;
-        if (workspaceRoot===undefined || workspaceRoot?.scheme!=='file') { return undefined; }
+        if (workspaceRoot===undefined || !['file', 'vscode-remote'].includes(workspaceRoot?.scheme || '')) { return undefined; }
 
         const settingUri = vscode.Uri.joinPath(workspaceRoot, '.overleaf/settings.json');
         try {
@@ -111,7 +111,7 @@ export class LocalReplicaSCMProvider extends BaseSCM {
 
     public static async uriToPath(uri: vscode.Uri): Promise<string | undefined> {
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri;
-        if (workspaceRoot===undefined || workspaceRoot?.scheme!=='file') { return undefined; }
+        if (workspaceRoot===undefined || !['file', 'vscode-remote'].includes(workspaceRoot?.scheme || '')) { return undefined; }
 
         const settingUri = vscode.Uri.joinPath(workspaceRoot, '.overleaf/settings.json');
         try {
@@ -124,7 +124,7 @@ export class LocalReplicaSCMProvider extends BaseSCM {
 
     public static async readSettings(): Promise<any | undefined> {
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri;
-        if (vscode.workspace.workspaceFolders?.length!==1 || workspaceRoot?.scheme!=='file') { return undefined; }
+        if (vscode.workspace.workspaceFolders?.length!==1 || workspaceRoot===undefined || !['file', 'vscode-remote'].includes(workspaceRoot.scheme)) { return undefined; }
 
         const settingUri = vscode.Uri.joinPath(workspaceRoot, '.overleaf/settings.json');
         try {
@@ -145,7 +145,11 @@ export class LocalReplicaSCMProvider extends BaseSCM {
     private running = new Set<string>();
     private rerun = new Set<string>();
     private initialScan = true;
-    private readonly output = vscode.window.createOutputChannel('Overleaf Safe Sync');
+    private static outputChannel?: vscode.OutputChannel;
+    static getOutputChannel(): vscode.OutputChannel {
+        return this.outputChannel ??= vscode.window.createOutputChannel('Overleaf Safe Sync');
+    }
+    private readonly output = LocalReplicaSCMProvider.getOutputChannel();
     private static readonly instances = new Map<string, LocalReplicaSCMProvider>();
 
     private matchIgnorePatterns(path: string): boolean {

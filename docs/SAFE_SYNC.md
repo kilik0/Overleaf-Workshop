@@ -13,6 +13,14 @@ This fork defaults Local Replica to **local-first, verified uploads**. It is int
 - No automatic deletion, in either direction. Local deletion is flagged for review. Rename therefore uploads the new path but leaves the old cloud path for manual cleanup.
 - Invisible Mode is unsupported for verified sync: its buffered acknowledgements do not prove server persistence.
 
+## 0.15.1002 fixes
+
+- Restore the current local replica from its `.overleaf/settings.json` when re-login removed the project SCM registry; never re-enable an explicitly disabled record.
+- Create the Safe Sync output channel at extension activation, including when replica startup fails.
+- Accept remote workspace URI schemes for metadata discovery.
+- Exact OT writes use the fresh server version (`v`/`lastV`) rather than the legacy periodic hash field. Actual server tests now pass for ASCII, Chinese, Greek symbols and multi-line LaTeX.
+- The legacy transport corrupts non-BMP Unicode (for example emoji); these files are rejected before sending instead of silently damaging cloud content. Ordinary Chinese/BMP symbols remain supported.
+
 ## First migration
 
 Back up the local project and reload **all** VS Code windows using the old extension after installing. The old live provider must not continue running alongside this fork.
@@ -41,7 +49,7 @@ Automatic retries do not bypass login failures. Reauthenticate when the server r
 
 ## Development / release
 
-The extension ID is deliberately retained (`iamhyc.overleaf-workshop`) so existing login and replica associations survive local VSIX installation. The display name identifies this fork. It is not published as an official marketplace release. Version `0.15.1001` distinguishes the local build from upstream `0.15.10`; explicitly installing upstream replaces these protections.
+The extension ID is deliberately retained (`iamhyc.overleaf-workshop`) so existing login and replica associations survive local VSIX installation. The display name identifies this fork. It is not published as an official marketplace release. Versions `0.15.1001` and `0.15.1002` distinguishes the local build from upstream `0.15.10`; explicitly installing upstream replaces these protections.
 
 - `npm ci --ignore-scripts`
 - `npx patch-package`

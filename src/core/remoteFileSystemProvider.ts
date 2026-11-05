@@ -872,6 +872,9 @@ export class VirtualFileSystem extends vscode.Disposable {
         if (fileType && fileType==='doc' && fileEntity) {
             const doc = fileEntity as DocumentEntity;
             const _content = new TextDecoder().decode(content);
+            if (exact && /[\uD800-\uDBFF][\uDC00-\uDFFF]/.test(_content)) {
+                throw new Error('Unsupported non-BMP Unicode in legacy Overleaf transport. File was not uploaded; local content preserved.');
+            }
             if (exact && expectedHash !== undefined && require('crypto').createHash('sha256').update(doc.remoteCache ?? '').digest('hex') !== expectedHash) {
                 throw new Error('Remote changed during upload preparation; refusing to overwrite.');
             }
@@ -885,11 +888,11 @@ export class VirtualFileSystem extends vscode.Disposable {
             const mergeRes = exact ? _content : mergeResArray[0] as string;
             const update = {
                 doc: doc._id,
-                lastV: doc.lastVersion,
+                lastV: exact ? doc.version : doc.lastVersion,
                 v: doc.version,
                 // Reference: services/web/frontend/js/vendor/libs/sharejs.js#L1288
                 hash: (()=>{
-                    if (exact || !doc.mtime || Date.now()-doc.mtime>5000) {
+                    if (!exact && (!doc.mtime || Date.now()-doc.mtime>5000)) {
                         doc.mtime = Date.now();
                         return require('crypto').createHash('sha1').update(
                             "blob " + mergeRes.length + "\x00" + mergeRes

@@ -12,7 +12,7 @@ const {VirtualFileSystem}=require('../out/core/remoteFileSystemProvider');const 
  const input=JSON.parse(fs.readFileSync(0,'utf8'));
  const api=new BaseAPI(input.url);const refreshed=await api.cookiesLogin(input.identity.cookies);if(refreshed.type!=='success')throw Error('Saved session is not usable for live test; '+refreshed.message);const identity=refreshed.identity;
  const name='Safe Sync Integration '+new Date().toISOString().replace(/[:.]/g,'-');
- const created=await api.newProject(identity,name,'blank');
+ const created=input.projectId?{type:'success',message:input.projectId}:await api.newProject(identity,name,'blank');
  if(created.type!=='success'||!created.message)throw Error('Scratch project creation failed: '+created.message);
  const projectId=created.message;console.log('SCRATCH_PROJECT',projectId,name);
  fs.writeFileSync('../live-test-project.json',JSON.stringify({projectId,name}));
@@ -22,21 +22,23 @@ const {VirtualFileSystem}=require('../out/core/remoteFileSystemProvider');const 
   try{project=await socket.joinProject(projectId);break;}catch(e){console.log('JOIN_RETRY',String(e));socket.init();}
  }
  if(!project)throw Error('Cannot connect to scratch project');
- const added=await api.addDoc(identity,projectId,project.rootFolder[0]._id,'safe-sync-test.tex');
+ const added=await api.addDoc(identity,projectId,project.rootFolder[0]._id,'safe-sync-'+Date.now()+'.tex');
  if(added.type!=='success'||!added.entity)throw Error('Could not create test document');
- const doc={...added.entity};
+ const doc={...added.entity};fs.writeFileSync('../live-test-doc.json',JSON.stringify({projectId,docId:doc._id}));
  const vfs=Object.create(VirtualFileSystem.prototype);
  Object.assign(vfs,{socket,api,projectId,serverName:'www.overleaf.com',context:{},notify:()=>undefined});
  vfs._resolveUri=async()=>({fileType:'doc',fileEntity:doc});
- const uri={};
+ socket.socket.on('disconnect',()=>console.log('LIVE_SOCKET_DISCONNECTED'));const uri={};
  const initial=await vfs.readFileForSync(uri);assert.equal(initial.length,0);
- const contents=['% local upload ASCII\n','% 中文公式 αβγ 😀\n\\section{测试}\n','% 最终版本\n'];
+ const contents=input.asciiOnly?['% first ASCII\n','% second ASCII version\n','% final ASCII\n']:['% local upload ASCII\n','% 中文公式 αβγ\n\\section{测试}\n','% 最终版本\n'];
  for(const content of contents){
-  const before=await vfs.readFileForSync(uri);await vfs.writeFileForSync(uri,Buffer.from(content),digest(before));
+  console.log('READ_BEFORE',content.length);const before=await vfs.readFileForSync(uri);console.log('WRITE',content.length,'base',before.length);await vfs.writeFileForSync(uri,Buffer.from(content),digest(before));console.log('READ_AFTER',content.length);
   const actual=await vfs.readFileForSync(uri);assert.equal(Buffer.from(actual).toString(),content);console.log('VERIFIED_UTF8',content.length);
  }
  // A deliberately wrong expected hash must prevent the write.
  await assert.rejects(()=>vfs.writeFileForSync(uri,Buffer.from('must not appear'),'0'.repeat(64)),/Remote changed/);
  assert.equal(Buffer.from(await vfs.readFileForSync(uri)).toString(),contents.at(-1));
+ const finalHash=digest(Buffer.from(contents.at(-1)));
+ await assert.rejects(()=>vfs.writeFileForSync(uri,Buffer.from('% 😀\n'),finalHash),/Unsupported non-BMP/);
  console.log('LIVE_PASS: server readback and stale-baseline rejection');socket.disconnect();process.exit(0);
 })().catch(e=>{console.error('LIVE_FAIL',e?.stack||String(e));process.exit(1);});

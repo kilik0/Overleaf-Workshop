@@ -1,5 +1,6 @@
+import { restoreReplicaRegistration } from './replicaRegistration';
 import * as vscode from 'vscode';
-import { VirtualFileSystem } from '../core/remoteFileSystemProvider';
+import { VirtualFileSystem, parseUri } from '../core/remoteFileSystemProvider';
 
 import { BaseSCM, CommitItem, SettingItem } from ".";
 import { LocalReplicaSCMProvider } from './localReplicaSCM';
@@ -65,7 +66,10 @@ export class SCMCollectionProvider extends vscode.Disposable {
 
         this.core = new CoreSCMProvider( vfs );
         this.historyDataProvider = new HistoryViewProvider( vfs );
-        this.initSCMs();
+        void this.initSCMs().catch(error => {
+            LocalReplicaSCMProvider.getOutputChannel().appendLine(`[startup error] ${String(error)}`);
+            void vscode.window.showErrorMessage(`Overleaf Safe Sync failed to restore replica: ${String(error)}`);
+        });
 
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
         this.statusBarItem.command = `${ROOT_NAME}.projectSCM.configSCM`;
@@ -125,16 +129,29 @@ export class SCMCollectionProvider extends vscode.Disposable {
         this.statusBarItem.show();
     }
 
-    private initSCMs() {
+    private async initSCMs() {
         const scmPersists = GlobalStateManager.getServerProjectSCMPersists(this.context, this.vfs.serverName, this.vfs.projectId);
-        Object.values(scmPersists).forEach(async scmPersist => {
+        const metadata = await LocalReplicaSCMProvider.readSettings();
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+        if (metadata?.uri && root) {
+            const linked = parseUri(vscode.Uri.parse(metadata.uri));
+            const baseUri = vscode.Uri.file(root.fsPath).toString();
+            if (restoreReplicaRegistration(scmPersists,
+                {server:linked.serverName, project:linked.projectId, baseUri},
+                {server:this.vfs.serverName, project:this.vfs.projectId}, LocalReplicaSCMProvider.label)) {
+                this.vfs.setProjectSCMPersist(baseUri, scmPersists[baseUri]);
+                LocalReplicaSCMProvider.getOutputChannel().appendLine(`Restored local replica registration from .overleaf/settings.json: ${root.fsPath}`);
+            }
+        }
+        for (const scmPersist of Object.values(scmPersists)) {
             const scmProto = supportedSCMs.find(scm => scm.label===scmPersist.label);
             if (scmProto!==undefined) {
                 const enabled = scmPersist.enabled ?? true;
                 const baseUri = vscode.Uri.parse(scmPersist.baseUri);
                 await this.createSCM(scmProto, baseUri, false, enabled);
             }
-        });
+        }
+        this.updateStatus();
     }
 
     private async createSCM(scmProto: SupportedSCM, baseUri: vscode.Uri, newSCM=false, enabled=true) {
