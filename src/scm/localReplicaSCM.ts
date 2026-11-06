@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
+import * as syncFs from 'fs';
 import * as nodePath from 'path';
 import { SafeSyncEngine, SyncPhase, digest } from './safeSyncEngine';
 import { SafeSyncStore } from './safeSyncStore';
@@ -152,10 +153,24 @@ export class LocalReplicaSCMProvider extends BaseSCM {
     private readonly output = LocalReplicaSCMProvider.getOutputChannel();
     private static readonly instances = new Map<string, LocalReplicaSCMProvider>();
 
+    static readonly changeListeners = new Set<() => void>();
+    static listSyncFiles(): {root: string; path: string; phase: string; detail: string}[] {
+        const result: {root: string; path: string; phase: string; detail: string}[] = [];
+        for (const [root, instance] of this.instances) {
+            const pending = instance.engine?.journal.pending || {};
+            for (const path of new Set([...Object.keys(pending), ...instance.failures.keys()])) {
+                result.push({root, path, phase: pending[path]?.phase || 'error', detail: pending[path]?.error || instance.failures.get(path) || 'Waiting for server verification'});
+            }
+        }
+        return result.sort((a,b) => a.root.localeCompare(b.root) || a.path.localeCompare(b.path));
+    }
+    private changed(): void { for (const listener of LocalReplicaSCMProvider.changeListeners) { listener(); } }
+    private log(detail: string): void { this.output.appendLine(`${new Date().toISOString()} [${this.baseUri.fsPath}] ${detail}`); }
+
     private matchIgnorePatterns(path: string): boolean {
         // A previous replica's custom patterns must not accidentally re-enable Tmp or our journal.
         const patterns = [...(this.getSetting<string[]>(IGNORE_SETTING_KEY) || this.ignorePatterns),
-            '**/Tmp', '**/Tmp/**', '**/.overleaf', '**/.overleaf/**'];
+            '**/Tmp', '**/Tmp/**', '**/.overleaf', '**/.overleaf/**', '**/*.safe-sync-*.tmp'];
         return patterns.some(pattern => minimatch(path, pattern, {dot:true}));
     }
     private localPath(name: string): string {
@@ -174,6 +189,8 @@ export class LocalReplicaSCMProvider extends BaseSCM {
             if (vscode.workspace.textDocuments.some(doc => doc.uri.fsPath === filename && doc.isDirty)) {
                 throw new Error('Unsaved editor changes; save the file before synchronization.');
             }
+            const stat = await fs.lstat(filename);
+            if (stat.isDirectory()) { return undefined; }
             return await fs.readFile(filename);
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') { return undefined; }
@@ -181,6 +198,7 @@ export class LocalReplicaSCMProvider extends BaseSCM {
         }
     }
     private refreshStatus(): void {
+        this.changed();
         const entries = Object.entries(this.engine?.journal.pending || {});
         if (this.failures.size) {
             this.status = {status:'need-attention', message:`${this.failures.size} file(s) need attention; ${entries.length} unverified. Review Safe Sync log.`};
@@ -195,7 +213,8 @@ export class LocalReplicaSCMProvider extends BaseSCM {
         }
     }
     private report(name: string, phase: SyncPhase | 'verified', detail: string): void {
-        this.output.appendLine(`${new Date().toISOString()} [${phase}] ${name}: ${detail}`);
+        const entry = this.engine?.journal.pending[name];
+        this.log(`[${phase}] ${name}: ${detail}${entry ? `; attempt=${entry.attempts}; local=${entry.target}; expected=${entry.expected ?? 'absent'}; observed=${entry.observed ?? 'absent'}` : ''}`);
         if (phase === 'error' || phase === 'conflict') { this.failures.set(name, detail); }
         else if (phase === 'verified') { this.failures.delete(name); }
         this.refreshStatus();
@@ -216,7 +235,8 @@ export class LocalReplicaSCMProvider extends BaseSCM {
             this.failures.set('[runtime]', String(error));
             this.output.appendLine(`${new Date().toISOString()} [error] ${String(error)}`);
             this.status = {status:'need-attention', message:`Sync stopped: ${String(error)}`};
-            void vscode.window.showErrorMessage(`Overleaf Safe Sync: ${String(error)}. Local files were not overwritten.`);
+            this.changed();
+            void vscode.window.showErrorMessage(`Overleaf Safe Sync: ${String(error)}. See sync changes and log for details.`);
         }
     }
     private schedule(name: string, retryOnly=false): void {
@@ -229,7 +249,13 @@ export class LocalReplicaSCMProvider extends BaseSCM {
         this.timers.set(name, setTimeout(() => {
             this.timers.delete(name);
             this.running.add(name);
-            void this.safely(async () => { await this.engine?.reconcile(name); }).finally(() => {
+            void this.safely(async () => {
+                try { if ((await fs.lstat(this.localPath(name))).isDirectory()) {
+                    for (const child of await this.scanLocal(`${name}/`)) { this.schedule(child); }
+                    return;
+                } } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error; } }
+                await this.engine?.reconcile(name);
+            }).finally(() => {
                 this.running.delete(name);
                 if (this.rerun.delete(name)) { this.schedule(name); }
                 this.refreshStatus();
@@ -267,6 +293,7 @@ export class LocalReplicaSCMProvider extends BaseSCM {
             catch (error) {
                 if ((error as vscode.FileSystemError).code !== 'FileNotFound') { throw error; }
                 await vscode.workspace.fs.createDirectory(uri);
+                this.log(`[created cloud folder] ${root}`);
             }
         }
     }
@@ -275,8 +302,9 @@ export class LocalReplicaSCMProvider extends BaseSCM {
         this.status = {status:'need-attention', message:'Starting Safe Sync; server verification pending.'};
         const identity = `${this.vfs.origin.toString()}|${this.baseUri.fsPath}`;
         this.store = new SafeSyncStore(nodePath.join(this.baseUri.fsPath, '.overleaf', 'safe-sync'), identity);
-        await this.store.lock();
+        LocalReplicaSCMProvider.instances.set(this.baseUri.fsPath, this); this.changed();
         try {
+            await this.store.lock();
             const journal = await this.store.load();
             this.engine = new SafeSyncEngine(journal, {
                 readLocal: name => this.readLocalSafe(name),
@@ -284,6 +312,7 @@ export class LocalReplicaSCMProvider extends BaseSCM {
                 writeRemote: async (name, data, expected) => {
                     if (this.disposed) { throw new Error('Synchronization stopped.'); }
                     await this.createParents(name);
+                    this.log(`[upload request] ${name}; bytes=${data.length}; ${expected === null ? 'create' : 'update'}`);
                     await this.vfs.writeFileForSync(this.vfs.pathToUri(name), data, expected);
                 },
                 saveBlob: (hash,data) => this.store!.saveBlob(hash,data),
@@ -320,7 +349,10 @@ export class LocalReplicaSCMProvider extends BaseSCM {
             const remoteWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(this.vfs.origin, '**/*'));
             const localEvent = (uri: vscode.Uri) => {
                 const prefix = `${this.baseUri.path.replace(/\/$/, '')}/`;
-                if (uri.path.startsWith(prefix)) { this.schedule(`/${uri.path.slice(prefix.length)}`); }
+                if (uri.path.startsWith(prefix)) {
+                    const name = `/${uri.path.slice(prefix.length)}`;
+                    if (!this.matchIgnorePatterns(name)) { this.log(`[local event] ${name}`); this.schedule(name); }
+                }
             };
             const remoteEvent = (uri: vscode.Uri) => {
                 const {pathParts} = parseUri(uri);
@@ -334,6 +366,7 @@ export class LocalReplicaSCMProvider extends BaseSCM {
                 }
             }, 20000);
             LocalReplicaSCMProvider.instances.set(this.baseUri.fsPath, this);
+            this.changed();
             const subscriptions: vscode.Disposable[] = [localWatcher, remoteWatcher,
                 localWatcher.onDidChange(localEvent), localWatcher.onDidCreate(localEvent), localWatcher.onDidDelete(localEvent),
                 remoteWatcher.onDidChange(remoteEvent), remoteWatcher.onDidCreate(remoteEvent), remoteWatcher.onDidDelete(remoteEvent),
@@ -341,7 +374,7 @@ export class LocalReplicaSCMProvider extends BaseSCM {
                 new vscode.Disposable(() => {
                     this.disposed = true; this.engine?.stop(); clearInterval(timer);
                     for (const t of this.timers.values()) { clearTimeout(t); }
-                    this.timers.clear(); LocalReplicaSCMProvider.instances.delete(this.baseUri.fsPath);
+                    this.timers.clear(); LocalReplicaSCMProvider.instances.delete(this.baseUri.fsPath); this.changed();
                     // Release only after queued/in-flight work settles: a replacement cannot race a writer.
                     void this.engine?.drain().then(() => this.store?.unlock()).catch(e => this.output.appendLine(String(e)));
                 }),
@@ -350,38 +383,80 @@ export class LocalReplicaSCMProvider extends BaseSCM {
             // Return subscriptions immediately; a slow server must not prevent visible error/status handling.
             this.initialScan = true;
             void this.safely(async () => {
-                const paths = new Set([...await this.scanLocal(), ...Object.keys(journal.verified), ...Object.keys(journal.pending)]);
+                const paths = new Set([...await this.scanLocal(), ...await this.scanRemote(), ...Object.keys(journal.verified), ...Object.keys(journal.pending)]);
+                this.log(`[inventory] ${paths.size} files; Tmp and configured ignore patterns excluded.`);
                 for (const name of paths) { if (!this.disposed) { await this.engine!.reconcile(name); } }
             }).finally(() => { this.initialScan = false; this.refreshStatus(); });
             return subscriptions;
-        } catch (error) { await this.store.unlock(); throw error; }
+        } catch (error) {
+            this.failures.set('[startup]',String(error)); this.changed();
+            await this.store.unlock(); throw error;
+        }
     }
-    static async runCommand(action: 'retry' | 'review' | 'publish'): Promise<void> {
-        const instance = [...this.instances.values()][0];
+    static async runCommand(action: 'retry' | 'review' | 'publish' | 'accept' | 'publishAll', item?: {root: string; path: string}): Promise<void> {
+        const instance = item?.root ? this.instances.get(item.root) : [...this.instances.values()][0];
         if (!instance?.engine || !instance.store) {
             void vscode.window.showWarningMessage('No active Local Replica. Open its root folder containing .overleaf/settings.json.'); return;
         }
         await instance.safely(async () => {
             if (action === 'retry') {
-                for (const name of await instance.scanLocal()) { await instance.engine!.reconcile(name); }
-                instance.refreshStatus(); return;
+                instance.log('[manual scan] Checking local and cloud inventory.');
+                for (const name of new Set([...await instance.scanLocal(), ...await instance.scanRemote(), ...Object.keys(instance.engine!.journal.pending)])) { await instance.engine!.reconcile(name); }
+                instance.failures.delete('[runtime]'); instance.refreshStatus(); return;
             }
             const paths = Object.keys(instance.engine!.journal.pending);
-            if (!paths.length) { void vscode.window.showInformationMessage('No unverified files.'); return; }
-            const name = await vscode.window.showQuickPick(paths, {title: action === 'review' ? 'Inspect unsynchronized file' : 'Select local file to publish'});
+            if (action === 'publishAll') {
+                if (!paths.length) { void vscode.window.showInformationMessage('No unverified files.'); return; }
+                const answer = await vscode.window.showWarningMessage(`Publish ALL ${paths.length} listed local files to Overleaf? Existing cloud versions will be backed up. Files missing locally are skipped.`, {modal:true}, 'Publish All Local');
+                if (answer !== 'Publish All Local') { return; }
+                instance.log(`[user action] Publish All Local: ${paths.join(', ')}`);
+                for (const name of paths) {
+                    await instance.safely(async () => { if (await instance.readLocalSafe(name) !== undefined) { await instance.engine!.authorizeLocal(name); } });
+                }
+                instance.refreshStatus(); return;
+            }
+            const name = item?.path ?? await vscode.window.showQuickPick(paths, {title: 'Select synchronization file'});
             if (!name) { return; }
-            const entry = instance.engine!.journal.pending[name];
+            instance.store!.validatePath(name);
+            instance.log(`[user action] ${action} ${name}`);
             if (action === 'review') {
-                instance.output.show();
                 const remote = await instance.vfs.readFileForSync(instance.vfs.pathToUri(name));
-                if (remote) {
-                    const hash = digest(remote); await instance.store!.saveBlob(hash,remote);
-                    await vscode.commands.executeCommand('vscode.diff', vscode.Uri.file(nodePath.join(instance.store!.root,'revisions',hash)),
-                        vscode.Uri.file(instance.localPath(name)), `Overleaf snapshot ↔ local: ${name}`);
-                } else { void vscode.window.showInformationMessage(`${name}: remote file is absent. ${entry.error || ''}`); }
-            } else {
+                const local = await instance.readLocalSafe(name);
+                const data = remote ?? new Uint8Array();
+                const hash = digest(data); await instance.store!.saveBlob(hash,data);
+                const left = vscode.Uri.file(nodePath.join(instance.store!.root,'revisions',hash));
+                const right = local === undefined ? left : vscode.Uri.file(instance.localPath(name));
+                if (local === undefined) {
+                    await vscode.commands.executeCommand('vscode.open', left);
+                    void vscode.window.showInformationMessage(`${name}: absent locally. Use Accept Cloud to download, or leave unchanged.`);
+                } else {
+                    await vscode.commands.executeCommand('vscode.diff', left, right, `Cloud (left) ↔ Local (right): ${name}`);
+                    if (remote === undefined) { void vscode.window.showInformationMessage(`${name}: absent on Overleaf; left side is empty. Use Publish Local to create it.`); }
+                }
+            } else if (action === 'publish') {
                 const answer = await vscode.window.showWarningMessage(`Publish local ${name} over its current Overleaf version? The remote snapshot will be backed up; your local file will not be changed.`, {modal:true}, 'Publish Local');
                 if (answer === 'Publish Local') { await instance.engine!.authorizeLocal(name); instance.refreshStatus(); }
+            } else if (action === 'accept') {
+                const answer = await vscode.window.showWarningMessage(`Replace local ${name} with the current cloud version? Saved local content will be backed up. Unsaved edits block this action.`, {modal:true}, 'Accept Cloud');
+                if (answer !== 'Accept Cloud') { return; }
+                await instance.engine!.acceptRemote(name, async (data, expected) => {
+                    // No await between last disk/editor checks and replacement. Watcher work is serialized by the engine.
+                    const filename = instance.localPath(name);
+                    await fs.mkdir(nodePath.dirname(filename), {recursive:true});
+                    await instance.readLocalSafe(name); // validate symlink parents
+                    if (vscode.workspace.textDocuments.some(d => d.uri.fsPath === filename && d.isDirty)) { throw new Error('Save or discard unsaved edits before accepting cloud.'); }
+                    const current = syncFs.existsSync(filename) ? syncFs.readFileSync(filename) : undefined;
+                    if ((current === undefined ? null : digest(current)) !== expected) { throw new Error('Local file changed while accepting cloud; try again after review.'); }
+                    const temp = `${filename}.safe-sync-${process.pid}.tmp`;
+                    try {
+                        const fd = syncFs.openSync(temp,'wx',syncFs.existsSync(filename) ? syncFs.statSync(filename).mode & 0o777 : 0o600);
+                        try { syncFs.writeFileSync(fd,data); syncFs.fsyncSync(fd); } finally { syncFs.closeSync(fd); }
+                        syncFs.renameSync(temp,filename);
+                    }
+                    finally { if (syncFs.existsSync(temp)) { syncFs.unlinkSync(temp); } }
+                });
+                instance.log(`[accepted cloud] ${name}; previous local content in .overleaf/safe-sync/revisions; hashes in history.jsonl.`);
+                instance.refreshStatus();
             }
         });
     }

@@ -149,6 +149,28 @@ export class SafeSyncEngine {
             this.io.report(path, 'error', detail);
         }
     }
+    /** Explicit one-file download only. Snapshot both versions and serialize against all uploads. */
+    acceptRemote(path: string, replace: (data: Uint8Array, expectedLocal: string | null) => Promise<void>): Promise<void> {
+        return this.serial(async () => {
+            if (this.closed || this.io.ignored(path)) { throw new Error('Sync stopped or path ignored.'); }
+            const local = await this.io.readLocal(path);
+            const expected = local === undefined ? null : digest(local);
+            if (local !== undefined) { await this.io.saveBlob(expected!, local); }
+            const remote = await this.io.readRemote(path);
+            if (remote === undefined) { throw new Error('Cloud file is absent; accepting cloud never deletes local files.'); }
+            const hash = digest(remote); await this.io.saveBlob(hash,remote);
+            if (await this.remoteHash(path) !== hash) { throw new Error('Cloud changed during review; retry Accept Cloud.'); }
+            const latest = await this.io.readLocal(path);
+            if ((latest === undefined ? null : digest(latest)) !== expected) { throw new Error('Local file changed; refusing to replace newer content.'); }
+            // Persist identifiable recovery information BEFORE the destructive user-authorized action.
+            this.journal.pending[path] = {target: expected ?? hash, expected: hash, observed: hash, phase:'conflict', attempts:0, error:'Accept Cloud requested; local/cloud backups saved.'};
+            await this.persist();
+            await replace(remote,expected);
+            const actual = await this.io.readLocal(path);
+            if (actual === undefined || digest(actual) !== hash) { throw new Error('Accepted cloud file did not match; review required.'); }
+            await this.complete(path,hash);
+        });
+    }
     /** Only after an explicit UI confirmation. Save cloud content before granting one overwrite. */
     authorizeLocal(path: string): Promise<void> {
         return this.serial(async () => {

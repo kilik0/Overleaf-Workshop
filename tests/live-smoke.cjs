@@ -44,5 +44,11 @@ const {VirtualFileSystem}=require('../out/core/remoteFileSystemProvider');const 
  assert.equal(Buffer.from(await vfs.readFileForSync(uri)).toString(),contents.at(-1));
  const finalHash=digest(Buffer.from(contents.at(-1)));
  await assert.rejects(()=>vfs.writeFileForSync(uri,Buffer.from('% 😀\n'),finalHash),/Unsupported non-BMP/);
+ const {SafeSyncEngine}=require('../out/scm/safeSyncEngine');
+ let disk=Buffer.from('local backup before explicit cloud download');const blobs=new Map();
+ const journal={version:1,project:'scratch',verified:{},pending:{}};
+ const engine=new SafeSyncEngine(journal,{readLocal:async()=>disk,readRemote:()=>vfs.readFileForSync(uri),writeRemote:()=>{throw Error('Accept Cloud must not upload')},saveBlob:async(h,d)=>blobs.set(h,Buffer.from(d)),loadBlob:async h=>blobs.get(h),saveJournal:async()=>{},report:()=>{},ignored:()=>false});
+ const oldHash=digest(disk);await engine.acceptRemote('/test.tex',async(data,expected)=>{assert.equal(expected,oldHash);assert.ok(blobs.has(oldHash));disk=Buffer.from(data)});
+ assert.equal(disk.toString(),contents.at(-1));assert.deepEqual(journal.pending,{});console.log('VERIFIED_EXPLICIT_ACCEPT_CLOUD');
  console.log('LIVE_PASS: server readback and stale-baseline rejection');socket.disconnect();process.exit(0);
 })().catch(e=>{console.error('LIVE_FAIL',e?.stack||String(e));process.exit(1);});

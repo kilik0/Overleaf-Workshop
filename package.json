@@ -2,7 +2,7 @@
   "name": "overleaf-workshop",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.15.1003",
+  "version": "0.15.1004",
   "icon": "resources/icons/app_icon.png",
   "author": {
     "name": "iamhyc",
@@ -397,17 +397,38 @@
       {
         "command": "overleaf-workshop.safeSync.retry",
         "title": "Retry and verify local files",
-        "category": "Overleaf Safe Sync"
+        "category": "Overleaf Safe Sync",
+        "icon": "$(refresh)"
       },
       {
         "command": "overleaf-workshop.safeSync.review",
         "title": "Review unverified files",
-        "category": "Overleaf Safe Sync"
+        "category": "Overleaf Safe Sync",
+        "icon": "$(diff)"
       },
       {
         "command": "overleaf-workshop.safeSync.publish",
         "title": "Publish selected local version...",
-        "category": "Overleaf Safe Sync"
+        "category": "Overleaf Safe Sync",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "overleaf-workshop.safeSync.accept",
+        "title": "Accept cloud version...",
+        "category": "Overleaf Safe Sync",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "overleaf-workshop.safeSync.publishAll",
+        "title": "Publish ALL local versions...",
+        "category": "Overleaf Safe Sync",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "overleaf-workshop.safeSync.log",
+        "title": "Show sync log",
+        "category": "Overleaf Safe Sync",
+        "icon": "$(output)"
       }
     ],
     "keybindings": [
@@ -563,6 +584,11 @@
     "views": {
       "overleaf-workshop": [
         {
+          "id": "overleaf-workshop.safeSyncChanges",
+          "name": "同步更改 / Safe Sync",
+          "visibility": "visible"
+        },
+        {
           "id": "overleaf-workshop.projectManager",
           "name": "%views.overleaf-workshop.projectManager.name%"
         }
@@ -626,6 +652,21 @@
           "command": "overleaf-workshop.projectHistory.clearSelection",
           "when": "view == overleaf-workshop.projectHistory",
           "group": "navigation@3"
+        },
+        {
+          "command": "overleaf-workshop.safeSync.retry",
+          "when": "view == overleaf-workshop.safeSyncChanges",
+          "group": "navigation@0"
+        },
+        {
+          "command": "overleaf-workshop.safeSync.publishAll",
+          "when": "view == overleaf-workshop.safeSyncChanges",
+          "group": "navigation@1"
+        },
+        {
+          "command": "overleaf-workshop.safeSync.log",
+          "when": "view == overleaf-workshop.safeSyncChanges",
+          "group": "navigation@2"
         }
       ],
       "editor/title": [
@@ -778,6 +819,21 @@
           "command": "overleaf-workshop.projectHistory.downloadProject",
           "when": "view == overleaf-workshop.projectHistory && viewItem =~ /historyItem(Labelled)?/",
           "group": "z_downloadAction"
+        },
+        {
+          "command": "overleaf-workshop.safeSync.review",
+          "when": "view == overleaf-workshop.safeSyncChanges && viewItem == safeSyncFile",
+          "group": "sync@0"
+        },
+        {
+          "command": "overleaf-workshop.safeSync.publish",
+          "when": "view == overleaf-workshop.safeSyncChanges && viewItem == safeSyncFile",
+          "group": "sync@1"
+        },
+        {
+          "command": "overleaf-workshop.safeSync.accept",
+          "when": "view == overleaf-workshop.safeSyncChanges && viewItem == safeSyncFile",
+          "group": "sync@2"
         }
       ]
     },
@@ -791,6 +847,12 @@
           }
         ],
         "priority": "default"
+      }
+    ],
+    "viewsWelcome": [
+      {
+        "view": "overleaf-workshop.safeSyncChanges",
+        "contents": "没有待处理文件。同步启动后，冲突、上传中和失败的文件会在这里按目录显示。\n[检查本地与云端](command:overleaf-workshop.safeSync.retry)\n[打开同步日志](command:overleaf-workshop.safeSync.log)"
       }
     ]
   },

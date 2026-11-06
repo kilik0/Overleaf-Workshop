@@ -13,6 +13,16 @@ This fork defaults Local Replica to **local-first, verified uploads**. It is int
 - No automatic deletion, in either direction. Local deletion is flagged for review. Rename therefore uploads the new path but leaves the old cloud path for manual cleanup.
 - Invisible Mode is unsupported for verified sync: its buffered acknowledgements do not prove server persistence.
 
+## 0.15.1004: Sync Changes sidebar
+
+Click Overleaf in the activity bar, then expand **同步更改 / Safe Sync**. Pending, verifying, conflict and error entries are grouped by replica and folder. Hover to read the full path and reason. Click a file for an action picker, or right-click for View Diff, Publish Local and Accept Cloud. The toolbar provides a fresh inventory scan, Publish ALL Local (confirmation required) and the sync log. Resolved files leave the list.
+
+Accept Cloud is an explicit one-file operation, never automatic. It refuses dirty editors, snapshots local and cloud bytes, records recovery hashes before replacing the local file, and refuses concurrent local/remote changes. A missing cloud file never deletes local content. Backups are under `.overleaf/safe-sync/revisions`; `history.jsonl` maps paths to hashes. Automatic reconciliation continues to be local-first.
+
+New saved local files upload automatically, including files in new nested folders. Cloud parents are created as needed. Existing cloud files with different content require review. Empty folders are not synchronized. Deletes and renames do not automatically remove old cloud files. Tmp and configured ignore rules remain in effect. Use the scan toolbar action to discover cloud-only files; no cloud-only file is downloaded without Accept Cloud.
+
+Logs include local watcher paths, inventory count, upload create/update and byte count, attempts, local/expected/observed SHA-256 hashes, user actions and verified results. No source text or credentials are logged.
+
 ## 0.15.1003 fixes
 
 File creation now sends multipart bytes with the matching Content-Type boundary to undici. The previous form-data stream was rejected by Overleaf with HTTP 400 `invalid_upload_request`. Upload failures retain the actual server error. Regression coverage checks multipart bytes and headers; live tests create a Chinese .bib document and verify a fresh server readback.

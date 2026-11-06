@@ -7,6 +7,7 @@ import { PdfViewEditorProvider } from './core/pdfViewEditorProvider';
 import { CompileManager } from './compile/compileManager';
 import { LangIntellisenseProvider } from './intellisense';
 import { LocalReplicaSCMProvider } from './scm/localReplicaSCM';
+import { SafeSyncView } from './scm/safeSyncView';
 
 export function activate(context: vscode.ExtensionContext) {
     const syncLog = LocalReplicaSCMProvider.getOutputChannel();
@@ -31,8 +32,9 @@ export function activate(context: vscode.ExtensionContext) {
     const langIntellisenseProvider = new LangIntellisenseProvider(context, remoteFileSystemProvider);
     context.subscriptions.push( ...langIntellisenseProvider.triggers );
 
-    for (const action of ['retry', 'review', 'publish'] as const) {
-        context.subscriptions.push(vscode.commands.registerCommand(`${ROOT_NAME}.safeSync.${action}`, () => LocalReplicaSCMProvider.runCommand(action)));
+    SafeSyncView.register(context);
+    for (const action of ['retry', 'review', 'publish', 'accept', 'publishAll'] as const) {
+        context.subscriptions.push(vscode.commands.registerCommand(`${ROOT_NAME}.safeSync.${action}`, (item) => LocalReplicaSCMProvider.runCommand(action,item)));
     }
 
     // activate vfs for local replica

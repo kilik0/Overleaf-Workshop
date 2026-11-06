@@ -84,3 +84,33 @@ test('journal persistence failure cannot mark a revision as verified',async()=>{
 test('remote-only file is flagged without writing to local disk',async()=>{
  const f=fixture();f.remote.set('/remote.tex',bytes('cloud-only'));await f.engine.reconcile('/remote.tex');assert(!f.local.has('/remote.tex'));assert.equal(f.journal.pending['/remote.tex'].phase,'conflict');
 });
+test('explicit Accept Cloud backs up both versions before replacing local and advances baseline',async()=>{
+ const f=fixture({local:'my work',remote:'cloud work'});await f.engine.reconcile('/main.tex');
+ await f.engine.acceptRemote('/main.tex',async(data,expected)=>{
+  assert.equal(expected,digest(bytes('my work')));assert(f.blobs.has(expected));assert(f.blobs.has(digest(data)));
+  assert.equal(f.saved.pending['/main.tex'].error,'Accept Cloud requested; local/cloud backups saved.');
+  f.local.set('/main.tex',Buffer.from(data));
+ });
+ assert.equal(f.local.get('/main.tex').toString(),'cloud work');assert.equal(f.writes,0);assert.deepEqual(f.journal.pending,{});
+ await f.engine.reconcile('/main.tex');assert.equal(f.writes,0);
+});
+test('Accept Cloud refuses missing cloud and never deletes local',async()=>{
+ const f=fixture();f.remote.clear();let called=false;
+ await assert.rejects(()=>f.engine.acceptRemote('/main.tex',async()=>{called=true}),/Cloud file is absent/);
+ assert.equal(called,false);assert.equal(f.local.get('/main.tex').toString(),'old');
+});
+test('Accept Cloud aborts when a newer local save arrives during snapshot',async()=>{
+ const f=fixture({local:'my work',remote:'cloud'});const old=f.io.readRemote;
+ f.io.readRemote=async p=>{f.local.set(p,bytes('newer'));return old(p)};
+ await assert.rejects(()=>f.engine.acceptRemote('/main.tex',async()=>assert.fail('must not replace')),/Local file changed/);
+ assert.equal(f.local.get('/main.tex').toString(),'newer');
+});
+test('Accept Cloud refuses changing cloud snapshots',async()=>{
+ const f=fixture({remote:'cloud'});let n=0;f.io.readRemote=async()=>bytes('cloud '+(++n));
+ await assert.rejects(()=>f.engine.acceptRemote('/main.tex',async()=>assert.fail('must not replace')),/Cloud changed/);
+});
+test('Accept Cloud supports remote-only file without automatic download',async()=>{
+ const f=fixture();f.local.clear();await f.engine.reconcile('/main.tex');assert(!f.local.has('/main.tex'));
+ await f.engine.acceptRemote('/main.tex',async(data,expected)=>{assert.equal(expected,null);f.local.set('/main.tex',data)});
+ assert.equal(f.local.get('/main.tex').toString(),'old');assert.deepEqual(f.journal.pending,{});
+});
