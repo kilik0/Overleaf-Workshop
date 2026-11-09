@@ -17,6 +17,7 @@ export interface SyncJournal {
     pending: Record<string, PendingFile>;
 }
 export interface SyncStorage {
+    exclusive?<T>(operation: () => Promise<T>): Promise<T>;
     readLocal(path: string): Promise<Uint8Array | undefined>;
     readRemote(path: string): Promise<Uint8Array | undefined>;
     writeRemote(path: string, data: Uint8Array, expected: string | null): Promise<void>;
@@ -37,7 +38,7 @@ export class SafeSyncEngine {
     stop(): void { this.closed = true; }
     drain(): Promise<void> { return this.chain; }
     private serial<T>(operation: () => Promise<T>): Promise<T> {
-        const next = this.chain.then(operation);
+        const next = this.chain.then(() => this.closed ? undefined as T : (this.io.exclusive ? this.io.exclusive(operation) : operation()));
         this.chain = next.then(() => undefined, () => undefined);
         return next;
     }
@@ -76,7 +77,12 @@ export class SafeSyncEngine {
         this.io.report(path, 'conflict', message);
     }
     /** Called on startup, explicit save, local watcher change or a remote notification. */
-    reconcile(path: string): Promise<void> { return this.serial(() => this.run(path)); }
+    reconcile(path: string): Promise<void> {
+        return this.serial(() => this.run(path)).catch(error => {
+            // Lock contention is reported per path, so the adapter can retry without aborting the inventory.
+            this.io.report(path,'error',String(error));
+        });
+    }
     private async run(path: string): Promise<void> {
         if (this.closed || this.io.ignored(path)) { return; }
         let entry = this.journal.pending[path];

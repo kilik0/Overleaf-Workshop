@@ -7,11 +7,17 @@ This fork defaults Local Replica to **local-first, verified uploads**. It is int
 - An existing local source file is never automatically rewritten or deleted by this replica provider. Restart, reconnect, missing history, remote edits and server errors do not change this rule.
 - Local saves and external file changes are coalesced (600 ms), serialized, uploaded and verified using a fresh server `joinDoc` response (or HTTP file download for binary files). The optimistic VFS cache is not upload confirmation.
 - Source revisions and the sync baseline/intent journal live in `.overleaf/safe-sync/`. Journal writes are atomic; SHA-256 revisions are checked. Keep this folder private and backed up: revisions contain document content. No automatic pruning in this first release.
-- Unsent local files are rediscovered on startup. Failed intents retry every 20 seconds; divergent files stay blocked until reviewed. A live process lock prevents two fork windows from syncing the same replica concurrently.
+- Unsent local files are rediscovered on startup. Failed intents retry every 20 seconds; divergent files stay blocked until reviewed. A transaction lock serializes sync operations across extension hosts; idle or detached hosts do not reserve the replica. Every operation reloads the latest disk journal under that lock.
 - A cloud version that differs from the last verified baseline blocks upload. Both available revisions are retained; nothing silently merges into local source.
 - `Tmp/` at every depth and `.overleaf/` are always ignored before disk/network processing, even when an old custom ignore list is present.
 - No automatic deletion, in either direction. Local deletion is flagged for review. Rename therefore uploads the new path but leaves the old cloud path for manual cleanup.
 - Invisible Mode is unsupported for verified sync: its buffered acknowledgements do not prove server persistence.
+
+## 0.15.1005: reconnect without idle window locks
+
+The lock now covers one synchronization transaction instead of the lifetime of an extension host. A detached but still-running Remote SSH extension no longer owns an idle replica. Overlapping operations wait up to 15 seconds and reload the newest journal before running; uploads and verification remain serialized. Network failures release the operation lock in `finally`; a busy in-flight operation is never forcibly stolen and is retried later.
+
+Linux locks include the boot ID and process start time so PID reuse after a WSL restart cannot impersonate the old owner. Dead-owner locks are recovered. A lock from an older fork whose process is still alive remains protected: reload that older session once when upgrading. Logs distinguish an in-flight operation, an older session lock and stale-lock recovery, and include the installed version and project initialization stages.
 
 ## 0.15.1004: Sync Changes sidebar
 

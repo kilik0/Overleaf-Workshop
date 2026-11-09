@@ -114,3 +114,9 @@ test('Accept Cloud supports remote-only file without automatic download',async()
  await f.engine.acceptRemote('/main.tex',async(data,expected)=>{assert.equal(expected,null);f.local.set('/main.tex',data)});
  assert.equal(f.local.get('/main.tex').toString(),'old');assert.deepEqual(f.journal.pending,{});
 });
+test('lock contention is reported per file and a later retry can recover without resetting history',async()=>{
+ const f=fixture();let busy=true;
+ f.io.exclusive=async op=>{if(busy)throw Error('Sync lock busy: operation in progress');return op()};
+ await f.engine.reconcile('/main.tex');assert.equal(f.reports.at(-1)[0],'/main.tex');assert.equal(f.reports.at(-1)[1],'error');assert.deepEqual(f.journal.pending,{});
+ busy=false;await f.engine.reconcile('/main.tex');assert.equal(f.journal.verified['/main.tex'],digest(bytes('old')));assert.equal(f.writes,0);
+});

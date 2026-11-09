@@ -254,7 +254,7 @@ export class LocalReplicaSCMProvider extends BaseSCM {
                     for (const child of await this.scanLocal(`${name}/`)) { this.schedule(child); }
                     return;
                 } } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error; } }
-                await this.engine?.reconcile(name);
+                try { await this.engine?.reconcile(name); } catch (error) { this.report(name,'error',String(error)); }
             }).finally(() => {
                 this.running.delete(name);
                 if (this.rerun.delete(name)) { this.schedule(name); }
@@ -304,9 +304,15 @@ export class LocalReplicaSCMProvider extends BaseSCM {
         this.store = new SafeSyncStore(nodePath.join(this.baseUri.fsPath, '.overleaf', 'safe-sync'), identity);
         LocalReplicaSCMProvider.instances.set(this.baseUri.fsPath, this); this.changed();
         try {
-            await this.store.lock();
-            const journal = await this.store.load();
+            const journal = await this.store.withLock(() => this.store!.load(), detail => this.log(`[lock] ${detail}`));
+            this.log('[lock] Transaction locking enabled; idle sessions do not own the replica.');
             this.engine = new SafeSyncEngine(journal, {
+                exclusive: operation => this.store!.withLock(async () => {
+                    // Another reconnected extension may have completed a transaction since our last one.
+                    const latest = await this.store!.load();
+                    journal.verified = latest.verified; journal.pending = latest.pending;
+                    return operation();
+                }, detail => this.log(`[lock] ${detail}`)),
                 readLocal: name => this.readLocalSafe(name),
                 readRemote: name => this.vfs.readFileForSync(this.vfs.pathToUri(name)),
                 writeRemote: async (name, data, expected) => {
@@ -361,6 +367,7 @@ export class LocalReplicaSCMProvider extends BaseSCM {
             };
             const timer = setInterval(() => {
                 if (this.disposed) { return; }
+                for (const name of this.failures.keys()) { if (name.startsWith('/')) { this.schedule(name,true); } }
                 for (const [name,entry] of Object.entries(journal.pending)) {
                     if (entry.phase !== 'conflict') { this.schedule(name, true); }
                 }
@@ -375,8 +382,8 @@ export class LocalReplicaSCMProvider extends BaseSCM {
                     this.disposed = true; this.engine?.stop(); clearInterval(timer);
                     for (const t of this.timers.values()) { clearTimeout(t); }
                     this.timers.clear(); LocalReplicaSCMProvider.instances.delete(this.baseUri.fsPath); this.changed();
-                    // Release only after queued/in-flight work settles: a replacement cannot race a writer.
-                    void this.engine?.drain().then(() => this.store?.unlock()).catch(e => this.output.appendLine(String(e)));
+                    // The running transaction releases its own lock in finally, even on a network failure.
+                    void this.engine?.drain().catch(e => this.output.appendLine(String(e)));
                 }),
             ];
             this.output.appendLine(`${new Date().toISOString()} Safe Sync active: ${this.baseUri.fsPath}; local-first, uncached server verification.`);
@@ -390,7 +397,7 @@ export class LocalReplicaSCMProvider extends BaseSCM {
             return subscriptions;
         } catch (error) {
             this.failures.set('[startup]',String(error)); this.changed();
-            await this.store.unlock(); throw error;
+            throw error;
         }
     }
     static async runCommand(action: 'retry' | 'review' | 'publish' | 'accept' | 'publishAll', item?: {root: string; path: string}): Promise<void> {
